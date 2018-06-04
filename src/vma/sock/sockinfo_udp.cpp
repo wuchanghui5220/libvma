@@ -1885,39 +1885,30 @@ ssize_t sockinfo_udp::tx(const tx_call_t call_type, const iovec* p_iov, const ss
 		if (unlikely(__flags & MSG_DONTWAIT))
 			b_blocking = false;
 
-		if (likely(p_dst_entry->is_valid())) {
-			/* Purpose of this condition to avoid redirect traffic to OS
-			 * in case this socket operates under NETVSC ring w/o SRIOV/VF
-			 * RX flow is able to work w/o special verification
-			 *
-			 * Note: This check is not effective but can be used as temporary
-			 * workaround to support Hyper-V solution
-			 * The first packet is lost as far as slow_send() includes
-			 * ring creation and send operations
-			 */
-			if (m_use_hyperv &&
-					p_dst_entry->get_ring()) {
-				ring_bond_netvsc* p_ring = dynamic_cast<ring_bond_netvsc*>(p_dst_entry->get_ring());
-				if (p_ring && !p_ring->is_vf_mode()) {
-					goto tx_packet_to_os;
-				}
+		/* Purpose of this condition to avoid redirect traffic to OS
+		 * in case this socket operates under NETVSC ring w/o SRIOV/VF
+		 * RX flow is able to work w/o special verification
+		 *
+		 * Note: This check is not effective but can be used as temporary
+		 * workaround to support Hyper-V solution
+		 * The first packet is lost as far as slow_send() includes
+		 * ring creation and send operations
+		 */
+		if (m_use_hyperv &&
+				p_dst_entry->get_ring()) {
+			ring_bond_netvsc* p_ring = dynamic_cast<ring_bond_netvsc*>(p_dst_entry->get_ring());
+			if (p_ring && !p_ring->is_vf_mode()) {
+				goto tx_packet_to_os;
 			}
+		}
+
+		if (likely(p_dst_entry->is_valid())) {
 			// All set for fast path packet sending - this is our best performance flow
 			ret = p_dst_entry->fast_send((iovec*)p_iov, sz_iov, is_dummy, b_blocking);
 		}
 		else {
 			// updates the dst_entry internal information and packet headers
 			ret = p_dst_entry->slow_send(p_iov, sz_iov, is_dummy, m_so_ratelimit, b_blocking, false, __flags, this, call_type);
-			/* See comment
-			 * above related socket operation under NETVSC ring w/o SRIOV/VF
-			 */
-			if (m_use_hyperv &&
-					p_dst_entry->get_ring()) {
-				ring_bond_netvsc* p_ring = dynamic_cast<ring_bond_netvsc*>(p_dst_entry->get_ring());
-				if (p_ring && !p_ring->is_vf_mode()) {
-					goto tx_packet_to_os;
-				}
-			}
 		}
 
 		if (unlikely(p_dst_entry->try_migrate_ring(m_lock_snd))) {
